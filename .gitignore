@@ -1,0 +1,21 @@
+# datasets
+datasets/
+
+#venv
+.formatcholecseg8k/
+
+#cache
+__pycache__/
+
+# images 
+demo_image/
+
+demo_video/
+
+vit_b.pth
+vit_h.pth
+vit_l.pth
+
+
+
+
