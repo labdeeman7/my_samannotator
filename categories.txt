@@ -4,4 +4,4 @@ irrigator
 clipper
 bipolar
 scissors
-suture_passer
+snare
