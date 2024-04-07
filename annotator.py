@@ -42,47 +42,50 @@ from segment_anything import sam_model_registry, SamPredictor
 
 
 
-
+#me label colormap. TODO I need to either replace this, or I need to fo
 LABEL_COLORMAP = imgviz.label_colormap()
 
 class MainWindow(QMainWindow):
 
-    FIT_WINDOW, FIT_WIDTH, MANUAL_ZOOM = 0, 1, 2
+    FIT_WINDOW, FIT_WIDTH, MANUAL_ZOOM = 0, 1, 2 #me only manual zoom seems to be used it is used for setting some kind of zoom mode
 
     def __init__(self, parent=None, global_w=1000, global_h=1800, model_type='vit_b', keep_input_size=True, max_size=1080):
         super(MainWindow, self).__init__(parent)
-        self.resize(global_w, global_h)
+        self.resize(global_w, global_h) #me I suspect these are changed with app resolution. 
         self.model_type = model_type
         self.keep_input_size = keep_input_size
         self.max_size = float(max_size)
 
-        self.setWindowTitle('segment-anything-annotator')
+        self.setWindowTitle('segment-anything-annotator') #me hey title. 
         self.canvas = Canvas(self,
             epsilon=10.0,
             double_click='close',
             num_backups=10,
             app=self,
-        )
+        ) #me canvas initialized. What is number of backups?
 
         
-        self._noSelectionSlot = False
-        self.current_output_dir = 'output'
+        self._noSelectionSlot = False #me No selection slot is very useful for removing event handling and ensuring events are not triggered multiple times.
+        self.current_output_dir = 'output' #me I guess this is default behaviour. But we change this when we select ann_dir. Not confirmed. 
         os.makedirs(self.current_output_dir, exist_ok=True)
-        self.current_output_filename = ''
-        self.canvas.zoomRequest.connect(self.zoomRequest)
+        self.current_output_filename = '' # This is what I am interested in improving. 
+        self.canvas.zoomRequest.connect(self.zoomRequest) # This affects canvas. Connects a function 
 
+        #Various variables that are important such as the sam_mask, the proposals. I am not sure what min_point_distance is. 
         self.memory_shapes = []
         self.sam_mask = []
         self.sam_mask_proposal = []
         self.image_encoded_flag = False
         self.min_point_dis = 4
 
-        self.predictor = None
-
+        self.predictor = None # predictor.
+        
+        #scrolling is handled here. Q scroll area defines a scrollable area. You can set widges in the scrollable area, make the widget resizable. Make scrollbars. 
+        #and connects signals emmited from the canvas to event handlers in the main window.  
         self.scroll_values = {
             Qt.Horizontal: {},
             Qt.Vertical: {},
-        }
+        } #Handles scrolling, keeps some x and y values for scrolln.  
         self.scrollArea = QScrollArea(self)
         self.scrollArea.setWidget(self.canvas)
         self.scrollArea.setWidgetResizable(True)
@@ -90,19 +93,22 @@ class MainWindow(QMainWindow):
             Qt.Vertical: self.scrollArea.verticalScrollBar(),
             Qt.Horizontal: self.scrollArea.horizontalScrollBar(),
         }
-        self.canvas.scrollRequest.connect(self.scrollRequest)
+        self.canvas.scrollRequest.connect(self.scrollRequest) #my first notice of event handling. It is a connection framework pyqt. 
         self.canvas.newShape.connect(self.newShape)
         self.canvas.shapeMoved.connect(self.setDirty)
         self.canvas.selectionChanged.connect(self.shapeSelectionChanged)
         self.canvas.drawingPolygon.connect(self.toggleDrawingSensitive)
 
-        self.uniqLabelList = UniqueLabelQListWidget()
+        #widgets are being defined. 
+        #this is a widget. For the displauying a list of items. I am not exactly sure where it is used.
+        self.uniqLabelList = UniqueLabelQListWidget() 
         self.uniqLabelList.setToolTip(
             self.tr(
                 "Select label to start annotating for it. "
                 "Press 'Esc' to deselect."
             )
         )
+        #widget for dialog, a dialog box, which is a child of mainwindow. 
         self.labelDialog = LabelDialog(
             parent=self,
             labels=[],
@@ -112,19 +118,22 @@ class MainWindow(QMainWindow):
             fit_to_content={'column': True, 'row': False},
         )
 
+        #this is a labellist widget. I think this is the one we use for selecting class. As the dibleclic, change,dropped are all connected to handlers. 
         self.labelList = LabelListWidget()
         self.labelList.itemSelectionChanged.connect(self.labelSelectionChanged)
         self.labelList.itemDoubleClicked.connect(self.editLabel)
         self.labelList.itemChanged.connect(self.labelItemChanged)
         self.labelList.itemDropped.connect(self.labelOrderChanged)
 
+        #this is the docking widget. Which displays the labellist of labels in an image. on the right side of the window. 
         self.shape_dock = QDockWidget(
             self.tr("Polygon Labels"), self
         )
         self.shape_dock.setObjectName("Labels")
         self.shape_dock.setWidget(self.labelList)
 
-        self.category_list = [i.strip() for i in open('categories.txt', 'r', encoding='utf-8').readlines()]
+        
+        self.category_list = [i.strip() for i in open('categories.txt', 'r', encoding='utf-8').readlines()] #initialization of the category list. 
         self.labelDialog = LabelDialog(
             parent=self,
             labels=self.category_list,
@@ -132,27 +141,36 @@ class MainWindow(QMainWindow):
             show_text_field=True,
             completion='contains',
             fit_to_content={'column': True, 'row': False},
-        )
+        ) #another dialog label, which overwrites the original label_dialog. It has the categories as the dialog. THis is what happens when you see the choose categories.
+        
+        #I think this is for when I want to work with videos, so ignoring currentlty.   
         self.zoom_values = {}
         self.video_directory = ''
         self.video_list = []
         self.video_len = len(self.video_list)
 
-        self.img_list = []
-        self.img_len = len(self.img_list)
-        self.current_img_index = 0
+        #we have an image list. TODO: this is useful for my todo which can jump to other points in the folder.  
+        self.img_list = [] #list of images, propagated when we click image directory button
+        self.img_len = len(self.img_list) 
+        self.current_img_index = 0 #starts from 0. 
         self.current_img = ''
         self.current_img_data = ''
 
-        self.button_next = QPushButton('Next Image', self)
-        self.button_next.clicked.connect(self.clickButtonNext)
-        self.button_last = QPushButton('Last Image', self)
-        self.button_last.clicked.connect(self.clickButtonLast)
+        #buttons for navigation
+        self.button_next = QPushButton('Next Image', self) # push button for next. 
+        self.button_next.clicked.connect(self.clickButtonNext) # an event handler for the onlcicked event. 
+        self.button_last = QPushButton('Last Image', self)  # push button for last. 
+        self.button_last.clicked.connect(self.clickButtonLast) # an event handler for the onlcicked event. 
 
+        #progress bar
         self.img_progress_bar = QProgressBar(self)
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(1)
-        self.img_progress_bar.setValue(0)
+        self.img_progress_bar.setValue(0) #initialization
+        
+        #woow, the Q push buttons were also used for the proposals!! But these have images. 
+        # There is a way to set the icons of the images, and these are set to the images of the other sam proposals. 
+        # This can be seen when you check button_proposal_list.
         self.button_proposal1 = QPushButton('Proposal1', self)
         self.button_proposal1.clicked.connect(self.choose_proposal1)
         self.button_proposal1.setShortcut('1')
@@ -170,7 +188,10 @@ class MainWindow(QMainWindow):
         self.class_on_flag = True
         self.class_on_text = QLabel("Class On", self)
         
-
+        #image name display
+        self.img_name = QLabel(f"Image Name: ", self)
+        
+        ## layout for the application. Note that the menu buttons have not been added.
         #naive layout
         self.scrollArea.move(int(0.02 * global_w), int(0.08 * global_h))
         self.scrollArea.resize(int(0.75 * global_w), int(0.7 * global_h))
@@ -193,13 +214,22 @@ class MainWindow(QMainWindow):
         self.button_proposal4.resize(int(0.17 * global_w),int(0.14 * global_h))
         self.button_proposal4.move(int(0.84 * global_w), int(0.8 * global_h))
         
+        self.img_name.move(int(0.4 * global_w), int(0.05 * global_h))
+        self.img_name.resize(int(0.15 * global_w),int(0.03 * global_h))
+        
         
         
         self.zoomWidget = ZoomWidget()
 
+        ## Actions initialization. All actions that would happen , there are two ways of doing this apparently. 
+        # Note that we add the action first, note that we can even give the text on the action.
+        # then we connect the action to a function which is to be triggered by this action. 
+        # Then we add the action to an event that is occuring. 
+        #A partial function with self prefilled. Where self is the mainwindow.
         action = functools.partial(utils.newAction, self)
         
-
+        # an action for the loading the category file. the lamda is the connect function. 
+        # self.tr("Category File"), this is the name for the action. 
         categoryFile = action(
             self.tr("Category File"),
             lambda: self.clickCategoryChoose(),
@@ -215,7 +245,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Image Directory"),
             enabled=True,
-        )
+        ) #image directory action. 
         LoadSAM = action(
             self.tr("Load SAM"),
             lambda: self.clickLoadSAM(),
@@ -223,7 +253,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Load SAM"),
             enabled=True,
-        )
+        ) # load sam button
         AutoSeg = action(
             self.tr("AutoSeg"),
             lambda: self.clickAutoSeg(),
@@ -231,7 +261,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("AutoSeg"),
             enabled=False,
-        )
+        )# not used.
         promptSeg = action(
             self.tr("Accept"),
             lambda: self.addSamMask(),
@@ -239,7 +269,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Accept"),
             enabled=False,
-        )
+        )#accept segmentation
 
         saveDirectory = action(
             self.tr("Save Directory"),
@@ -248,7 +278,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Save Directory"),
             enabled=True,
-        )
+        )#save directory in menu
 
         createMode = action(
             self.tr("Manual Polygons"),
@@ -257,7 +287,8 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Start drawing polygons"),
             enabled=True,
-        )
+        )# manual polygon, affects the canvas. 
+        
         createPointMode = action(
             self.tr("Point Prompt"),
             lambda: self.toggleDrawMode(False, createMode="point"),
@@ -265,7 +296,8 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Point Prompt"),
             enabled=True,
-        )
+        ) #point prompt
+        
         createRectangleMode = action(
             self.tr("Box Prompt"),
             lambda: self.toggleDrawMode(False, createMode="rectangle"),
@@ -273,7 +305,8 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Box Prompt"),
             enabled=True,
-        )
+        ) #box prompt
+        
         cleanPrompt = action(
             self.tr("Reject"),
             lambda: self.cleanPrompt(),
@@ -281,16 +314,17 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Reject"),
             enabled=True,
-        )
+        ) # reject, cleans all things for segmentation.
         
+        #TODO: Remove switching of class 
         self.switchClass = action(
             self.tr("Class On/Off"),
             lambda: self.clickSwitchClass(),
             'none',
             "objects",
             self.tr("Class On/Off"),
-            enabled=True,
-        )
+            enabled=False,
+        ) # swithc class on and off. 
 
         editMode = action(
             self.tr("Edit Polygons"),
@@ -307,7 +341,7 @@ class MainWindow(QMainWindow):
             "save-as",
             self.tr("Save labels to a different file"),
             enabled=True,
-        )
+        )#not seen anywhere
 
         undoLastPoint = action(
             self.tr("Undo last point"),
@@ -316,7 +350,7 @@ class MainWindow(QMainWindow):
             "undo",
             self.tr("Undo last drawn point"),
             enabled=False,
-        )
+        )#undolast point, this is always greyed out currently. 
 
         hideAll = action(
             self.tr("&Hide\nPolygons"),
@@ -324,14 +358,15 @@ class MainWindow(QMainWindow):
             icon="eye",
             tip=self.tr("Hide all polygons"),
             enabled=False,
-        )
+        )# not seen anywhere
+        
         showAll = action(
             self.tr("&Show\nPolygons"),
             functools.partial(self.togglePolygons, True),
             icon="eye",
             tip=self.tr("Show all polygons"),
             enabled=False,
-        )
+        )#not seen anywhere.
 
         undo = action(
             self.tr("Undo"),
@@ -340,7 +375,7 @@ class MainWindow(QMainWindow):
             "undo",
             self.tr("Undo last add and edit of shape"),
             enabled=False,
-        )
+        )#undo button
 
         save = action(
             self.tr("&Save"),
@@ -349,7 +384,7 @@ class MainWindow(QMainWindow):
             "save",
             self.tr("Save labels to file"),
             enabled=False,
-        )
+        ) # never used. blurred out. 
 
         delete = action(
             self.tr("Delete Polygons"),
@@ -358,7 +393,8 @@ class MainWindow(QMainWindow):
             "cancel",
             self.tr("Delete the selected polygons"),
             enabled=False,
-        )
+        ) # delete polygons
+        
         duplicate = action(
             self.tr("Duplicate Polygons"),
             self.duplicateSelectedShape,
@@ -366,7 +402,8 @@ class MainWindow(QMainWindow):
             "copy",
             self.tr("Create a duplicate of the selected polygons"),
             enabled=False,
-        )
+        ) # duplicate polygons
+        
         reduce_point = action(
             self.tr("Reduce Points"),
             self.reducePoint,
@@ -374,7 +411,8 @@ class MainWindow(QMainWindow):
             "copy",
             self.tr("Reduce Points"),
             enabled=True,
-        )            
+        )   # reduce points. 
+                 
         edit = action(
             self.tr("&Edit Label"),
             self.editLabel,
@@ -382,9 +420,9 @@ class MainWindow(QMainWindow):
             "edit",
             self.tr("Modify the label of the selected polygon"),
             enabled=False,
-        )
+        ) # edit label.
         
-
+        # actions struct. 
         self.actions = utils.struct(
             categoryFile=categoryFile,
             imageDirectory=imageDirectory,
@@ -414,7 +452,7 @@ class MainWindow(QMainWindow):
                 save,
             )
             )
-
+        #things for the canvas. Add actions etc 
         # Custom context menu for the canvas widget:
         utils.addActions(self.canvas.menus[0], self.actions.menu)
         utils.addActions(
@@ -425,6 +463,7 @@ class MainWindow(QMainWindow):
             ),
         )
 
+        #define the tool bar in which we add actions. 
         self.toolbar = self.addToolBar('Tool')
         self.toolbar.addAction(categoryFile)
         self.toolbar.addAction(imageDirectory)
@@ -465,7 +504,7 @@ class MainWindow(QMainWindow):
         self.zoomWidget.setEnabled(True)
 
         self.zoomWidget.valueChanged.connect(self.paintCanvas)
-        self.canvas.actions = self.actions
+        self.canvas.actions = self.actions # all the actions are added to canvas?
 
 
     def saveFileAs(self, _value=False):
@@ -651,10 +690,11 @@ class MainWindow(QMainWindow):
             self.loadAnno(self.current_output_filename)
         self.image_encoded_flag = False
         self.current_img_data = LabelFile.load_image_file(self.current_img)
+        self.img_name.setText(f"Image Name: {img_name}") 
 
 
     def clickFileChoose(self):
-        directory = QFileDialog.getExistingDirectory(self, 'choose target fold','.')
+        directory = QFileDialog.getExistingDirectory(self, 'choose sequence img_dir','.')
         if directory == '':
             return
         #self.img_list = glob.glob(directory + '/*.{jpg,png,JPG,PNG}')
@@ -668,9 +708,10 @@ class MainWindow(QMainWindow):
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(self.img_len-1)
         self.loadImg()
+        
 
     def clickSaveChoose(self):
-        directory = QFileDialog.getExistingDirectory(self, 'choose target fold','.')
+        directory = QFileDialog.getExistingDirectory(self, 'choose sequence ann_dir','.')
         if directory == '':
             return
         else:
@@ -687,6 +728,7 @@ class MainWindow(QMainWindow):
         else:
             self.class_on_flag = True
             self.class_on_text.setText('Class On')
+            
 
 
     def clickCategoryChoose(self):
