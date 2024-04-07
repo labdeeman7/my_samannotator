@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         self.class_on_text = QLabel("Class On", self)
         
         #image name display
-        self.img_name = QLabel(f"Image Name: ", self)
+        self.img_name = QLabel(f"", self)
         
         ## layout for the application. Note that the menu buttons have not been added.
         #naive layout
