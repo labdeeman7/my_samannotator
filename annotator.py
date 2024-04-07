@@ -23,6 +23,7 @@ from qtpy import QtGui, QtWidgets
 from canvas import Canvas
 import utils
 from utils.download_model import download_model
+from utils import ImageNavigationWidget
 
 from labelme.widgets import ToolBar, UniqueLabelQListWidget, LabelDialog, LabelListWidget, LabelListWidgetItem, ZoomWidget
 from labelme import PY2
@@ -142,7 +143,7 @@ class MainWindow(QMainWindow):
             completion='contains',
             fit_to_content={'column': True, 'row': False},
         ) #another dialog label, which overwrites the original label_dialog. It has the categories as the dialog. THis is what happens when you see the choose categories.
-        
+               
         #I think this is for when I want to work with videos, so ignoring currentlty.   
         self.zoom_values = {}
         self.video_directory = ''
@@ -161,6 +162,13 @@ class MainWindow(QMainWindow):
         self.button_next.clicked.connect(self.clickButtonNext) # an event handler for the onlcicked event. 
         self.button_last = QPushButton('Last Image', self)  # push button for last. 
         self.button_last.clicked.connect(self.clickButtonLast) # an event handler for the onlcicked event. 
+        self.button_jump = QPushButton('Jump', self)  # push button for jumping to an image. 
+        self.button_jump.clicked.connect(self.clickButtonJump) # an event handler for the onlcicked event. 
+        
+        # they start disabled. 
+        self.button_last.setEnabled(False)
+        self.button_next.setEnabled(False)
+        self.button_jump.setEnabled(False)
 
         #progress bar
         self.img_progress_bar = QProgressBar(self)
@@ -216,6 +224,8 @@ class MainWindow(QMainWindow):
         
         self.img_name.move(int(0.4 * global_w), int(0.05 * global_h))
         self.img_name.resize(int(0.15 * global_w),int(0.03 * global_h))
+        self.button_jump.move(int(0.12 * global_w), int(0.85 * global_h))
+        self.button_jump.resize(int(0.05 * global_w),int(0.04 * global_h))
         
         
         
@@ -650,6 +660,24 @@ class MainWindow(QMainWindow):
             self.current_img_index -= 1
             self.current_img = self.img_list[self.current_img_index]
             self.loadImg()
+    
+    def clickButtonJump(self):
+        if self.actions.save.isEnabled():
+            self.saveFile()
+        
+        imageNavigator = ImageNavigationWidget(
+            parent=self,
+            image_list=self.img_list,
+            init_index=self.current_img_index
+        )   
+        
+        imageNavigator.imageSelected.connect(self.handleJumpImageSelection)
+        imageNavigator.exec_()  
+    
+    def handleJumpImageSelection(self, index): 
+        self.current_img_index = index
+        self.current_img = self.img_list[self.current_img_index]
+        self.loadImg()        
 
 
     def choose_proposal1(self):
@@ -708,6 +736,14 @@ class MainWindow(QMainWindow):
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(self.img_len-1)
         self.loadImg()
+        self.enableNavigation()
+        
+        
+    def enableNavigation(self):
+       #Enable navigation
+        self.button_last.setEnabled(True)
+        self.button_next.setEnabled(True)
+        self.button_jump.setEnabled(True) 
         
 
     def clickSaveChoose(self):
