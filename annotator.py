@@ -515,8 +515,14 @@ class MainWindow(QMainWindow):
 
         self.zoomWidget.valueChanged.connect(self.paintCanvas)
         self.canvas.actions = self.actions # all the actions are added to canvas?
+        
+        #colour variables
+        self.n_classes = len(self.category_list)
+        self.n_instances_per_class_max_for_visualization = 4 ## This can be a parameter probably.
+        self.instance_color_map = self._generate_instance_colormap()
 
 
+    ################# Methods #################################
     def saveFileAs(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
         self._saveFile(self.saveFileDialog())
@@ -645,6 +651,7 @@ class MainWindow(QMainWindow):
             self.addLabel(shape)
         self.canvas.loadShapes([item.shape() for item in self.labelList])
 
+    ##Navigation
     def clickButtonNext(self):
         if self.actions.save.isEnabled():
             self.saveFile()
@@ -679,7 +686,8 @@ class MainWindow(QMainWindow):
         self.current_img = self.img_list[self.current_img_index]
         self.loadImg()        
 
-
+    
+    ## proposals
     def choose_proposal1(self):
         if len(self.sam_mask_proposal) > 0:
             self.sam_mask = self.sam_mask_proposal[0]
@@ -782,6 +790,8 @@ class MainWindow(QMainWindow):
                     completion='contains',
                     fit_to_content={'column': True, 'row': False},
                 )
+                #regenerate the colours based on the categorylist
+                self.instance_color_map = self._generate_instance_colormap()
         except Exception as e:
             pass
 
@@ -1259,7 +1269,8 @@ class MainWindow(QMainWindow):
             item = self.uniqLabelList.createItemFromLabel(shape.label)
             self.uniqLabelList.addItem(item)
             # rgb = self._get_rgb_by_label(shape.label)
-            rgb = self._get_rgb_by_label(shape.group_id)
+            # rgb = self._get_rgb_by_label(shape.group_id)
+            rgb = self._get_rgb_by_label_and_instance_id(shape.label, shape.group_id)
             self.uniqLabelList.setItemLabel(item, shape.label, rgb)
 
     def labelItemChanged(self, item):
@@ -1281,7 +1292,8 @@ class MainWindow(QMainWindow):
             item = self.uniqLabelList.createItemFromLabel(shape.label)
             self.uniqLabelList.addItem(item)
             # rgb = self._get_rgb_by_label(shape.label)
-            rgb = self._get_rgb_by_label(shape.group_id)
+            # rgb = self._get_rgb_by_label(shape.group_id)
+            rgb = self._get_rgb_by_label_and_instance_id(shape.label, shape.group_id)
             self.uniqLabelList.setItemLabel(item, shape.label, rgb)
         self.labelDialog.addLabelHistory(shape.label)
         for action in self.actions.onShapesPresent:
@@ -1293,8 +1305,50 @@ class MainWindow(QMainWindow):
                 html.escape(text), *shape.fill_color.getRgb()[:3]
             )
         )
+    ## colour    
+    def _generate_instance_colormap(self):
+        # Generate class colors using imgviz.label_colormap
+        class_colors = imgviz.label_colormap(self.n_classes+1)
+        class_colors = class_colors[1:,:] #remove the gray colour.  
+        
+        
+        class_colors = class_colors/255
+
+        # Create an empty list to store instance colors
+        instance_color_map = []
+
+        # Iterate over each class
+        for class_idx in range(self.n_classes):
+            # Get the default color for the class
+            class_color = class_colors[class_idx]
+
+            # Calculate offsets for instance colors
+            # You can customize these offsets based on your preference
+            instance_offsets = np.linspace(0.1, 0.6, self.n_instances_per_class_max_for_visualization)
+
+            # Iterate over each instance in the class and add a little offset, then return to 255
+            for instance_offset in instance_offsets:
+                instance_color = np.clip(class_color + instance_offset, 0.0, 1.0)
+                instance_color = instance_color * 255
+                instance_color = instance_color.astype(int)
+                instance_color_map.append(instance_color)
+
+        
+        return instance_color_map    
+    
+    def _get_color(self, label, instance_id):
+        instance_id = int(instance_id)
+        #capped to n_instances_per_class_max_for_visualization 
+        if instance_id >= self.n_instances_per_class_max_for_visualization: 
+            instance_id = self.n_instances_per_class_max_for_visualization-1 
+        
+        class_id =  self.category_list.index(label)
+        color_id = int(class_id*self.n_instances_per_class_max_for_visualization + instance_id)
+        return self.instance_color_map[color_id]
+        
     def _get_rgb_by_label(self, label):
         label = str(label)
+        # print(f'label {label}')
         item = self.uniqLabelList.findItemByLabel(label)
         if item is None:
             item = self.uniqLabelList.createItemFromLabel(label)
@@ -1302,8 +1356,28 @@ class MainWindow(QMainWindow):
             rgb = self._get_rgb_by_label(label)
             self.uniqLabelList.setItemLabel(item, label, rgb)
         label_id = self.uniqLabelList.indexFromItem(item).row() + 1
+        # print(f'label_id {label_id}')
         label_id += 0
+        # print(f'label_id {label_id}')
         return LABEL_COLORMAP[label_id % len(LABEL_COLORMAP)]
+
+    
+    def _get_rgb_by_label_and_instance_id(self, label, instance_id):
+        label = str(label)
+        instance_id = str(instance_id)
+        item = self.uniqLabelList.findItemByLabel(instance_id)
+        if item is None:
+            item = self.uniqLabelList.createItemFromLabel(instance_id)
+            self.uniqLabelList.addItem(item)
+            rgb = self._get_rgb_by_label_and_instance_id(label, instance_id)
+            self.uniqLabelList.setItemLabel(item, instance_id, rgb)
+        
+        color =  self._get_color(label, instance_id)
+        return color
+        # label_id = self.uniqLabelList.indexFromItem(item).row() + 1    
+        # label_id = self.uniqLabelList.indexFromItem(item).row() + 1
+        
+        # return LABEL_COLORMAP[label_id % len(LABEL_COLORMAP)]
 
     def togglePolygons(self, value):
         for item in self.labelList:
@@ -1311,7 +1385,8 @@ class MainWindow(QMainWindow):
 
     def _update_shape_color(self, shape):
         # r, g, b = self._get_rgb_by_label(shape.label)
-        r, g, b = self._get_rgb_by_label(shape.group_id)
+        # r, g, b = self._get_rgb_by_label(shape.group_id)
+        r, g, b = self._get_rgb_by_label_and_instance_id(shape.label, shape.group_id)
         shape.line_color = QtGui.QColor(r, g, b)
         shape.vertex_fill_color = QtGui.QColor(r, g, b)
         shape.hvertex_fill_color = QtGui.QColor(255, 255, 255)
