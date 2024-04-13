@@ -23,12 +23,13 @@ from qtpy import QtGui, QtWidgets
 from canvas import Canvas
 import utils
 from utils.download_model import download_model
-from utils import ImageNavigationWidget
+from utils import ImageNavigationDialog, QualityControlDialog
 
 from labelme.widgets import ToolBar, UniqueLabelQListWidget, LabelDialog, LabelListWidget, LabelListWidgetItem, ZoomWidget
 from labelme import PY2
 from labelme.label_file import LabelFile
 from labelme.label_file import LabelFileError
+
 
 
 from shape import Shape
@@ -50,12 +51,13 @@ class MainWindow(QMainWindow):
 
     FIT_WINDOW, FIT_WIDTH, MANUAL_ZOOM = 0, 1, 2 #me only manual zoom seems to be used it is used for setting some kind of zoom mode
 
-    def __init__(self, parent=None, global_w=1000, global_h=1800, model_type='vit_b', keep_input_size=True, max_size=1080):
+    def __init__(self, parent=None, global_w=1000, global_h=1800, model_type='vit_b', keep_input_size=True, max_size=1080, quality_control_mode=False):
         super(MainWindow, self).__init__(parent)
         self.resize(global_w, global_h) #me I suspect these are changed with app resolution. 
         self.model_type = model_type
         self.keep_input_size = keep_input_size
         self.max_size = float(max_size)
+        self.quality_control_mode = quality_control_mode
 
         self.setWindowTitle('segment-anything-annotator') #me hey title. 
         self.canvas = Canvas(self,
@@ -198,6 +200,16 @@ class MainWindow(QMainWindow):
         
         #image name display
         self.img_name = QLabel(f"", self)
+        self.img_name.setStyleSheet("font-size: 10pt; color: black;")
+        
+        
+        #Quality Control display
+        self.quality_control_label = QLabel(f"", self)
+        self.quality_control_label.setStyleSheet("font-size: 10pt; color: black;")
+        
+        #Quality Control display
+        if self.quality_control_mode:
+            self.quality_control_json_file_path = None
         
         ## layout for the application. Note that the menu buttons have not been added.
         #naive layout
@@ -222,8 +234,10 @@ class MainWindow(QMainWindow):
         self.button_proposal4.resize(int(0.17 * global_w),int(0.14 * global_h))
         self.button_proposal4.move(int(0.84 * global_w), int(0.8 * global_h))
         
-        self.img_name.move(int(0.4 * global_w), int(0.05 * global_h))
-        self.img_name.resize(int(0.15 * global_w),int(0.03 * global_h))
+        self.img_name.move(int(0.2 * global_w), int(0.05 * global_h))
+        self.img_name.resize(int(0.2 * global_w),int(0.03 * global_h))
+        self.quality_control_label.move(int(0.53 * global_w), int(0.05 * global_h))
+        self.quality_control_label.resize(int(0.25 * global_w),int(0.03 * global_h))
         self.button_jump.move(int(0.12 * global_w), int(0.85 * global_h))
         self.button_jump.resize(int(0.05 * global_w),int(0.04 * global_h))
         
@@ -432,6 +446,15 @@ class MainWindow(QMainWindow):
             enabled=False,
         ) # edit label.
         
+        quality_control = action(
+            self.tr("Quality Control"),
+            lambda: self.qualityControl(),
+            'q',
+            "objects",
+            self.tr("Quality Control"),
+            enabled=False,
+        ) # quality control menu
+        
         # actions struct. 
         self.actions = utils.struct(
             categoryFile=categoryFile,
@@ -460,7 +483,8 @@ class MainWindow(QMainWindow):
                 undoLastPoint,
                 undo,
                 save,
-            )
+            ),
+            quality_control=quality_control
             )
         #things for the canvas. Add actions etc 
         # Custom context menu for the canvas widget:
@@ -494,6 +518,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(duplicate)
         self.toolbar.addAction(reduce_point)
         self.toolbar.addAction(save)
+        self.toolbar.addAction(quality_control)
         self.toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
 
         zoom = QtWidgets.QWidgetAction(self)
@@ -672,7 +697,7 @@ class MainWindow(QMainWindow):
         if self.actions.save.isEnabled():
             self.saveFile()
         
-        imageNavigator = ImageNavigationWidget(
+        imageNavigator = ImageNavigationDialog(
             parent=self,
             image_list=self.img_list,
             init_index=self.current_img_index
@@ -726,8 +751,12 @@ class MainWindow(QMainWindow):
             self.loadAnno(self.current_output_filename)
         self.image_encoded_flag = False
         self.current_img_data = LabelFile.load_image_file(self.current_img)
-        self.img_name.setText(f"Image Name: {img_name}") 
-
+        #set image_name
+        self.changeImageName(img_name)
+        #update quality control if we in quality control mode
+        if self.quality_control_mode:
+            self.updateQualityControl(img_name)
+        
 
     def clickFileChoose(self):
         directory = QFileDialog.getExistingDirectory(self, 'choose sequence img_dir','.')
@@ -743,8 +772,16 @@ class MainWindow(QMainWindow):
         self.current_img = self.img_list[self.current_img_index]
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(self.img_len-1)
+                
+        if self.quality_control_mode:
+            self.loadQualityControl(directory)
+            self.actions.quality_control.setEnabled(True)
+        
         self.loadImg()
         self.enableNavigation()
+       
+            
+        
         
         
     def enableNavigation(self):
@@ -1013,8 +1050,6 @@ class MainWindow(QMainWindow):
         self.actions.save.setEnabled(True)
         self.actions.editMode.setEnabled(True)
 
-
-
     def cleanPrompt(self):
         self.canvas.currentBox = None
         self.canvas.currentPos = None
@@ -1026,7 +1061,84 @@ class MainWindow(QMainWindow):
         self.canvas.setHiding()
         self.canvas.update()
         self.actions.editMode.setEnabled(True)
+    
+    ###################image name######################
+    def changeImageName(self, img_name): 
+        self.img_name.setText(f"Image Name: {img_name}")   
+           
+    ##################Quality Control#########################################     
+    def loadQualityControl(self, img_directory):
+        ## Checl
+        parent_dir = os.path.dirname(img_directory)
+        # Check if the folder exists
+        assert os.path.exists(parent_dir), 'the img folder does not exist.' 
 
+        # Extract folder name
+        seq_name = os.path.basename(parent_dir)
+
+        # Construct Quality control JSON file path
+        self.quality_control_json_file_path = os.path.join(parent_dir, f"{seq_name}_quality_control.json")
+
+        # Check if JSON file exists
+        if os.path.exists(self.quality_control_json_file_path):
+            with open(self.quality_control_json_file_path, 'r') as json_file:
+                data = json.load(json_file)
+                assert isinstance(data, dict), "JSON file does not contain a dictionary."
+        else:
+            # Create JSON file
+            with open(self.quality_control_json_file_path, 'w') as json_file:
+                # You can customize the initial JSON content here
+                initial_data = {"seq_name": seq_name,
+                                "quality_control": {}}
+                
+                json.dump(initial_data, json_file)
+
+    def updateQualityControl(self, img_name):
+        with open(self.quality_control_json_file_path, 'r') as json_file:
+            data = json.load(json_file)
+
+            # Check if "img_name" key exists within "data[quality_control]"
+            if img_name in data["quality_control"]:
+                self.quality_control_label.setText(f"Quality Control: {data['quality_control'][img_name]}") 
+                if data['quality_control'][img_name] == 'Accepted':
+                    self.quality_control_label.setStyleSheet("font-size: 10pt; color: green;")
+                elif data['quality_control'][img_name] == 'Rejected':
+                    self.quality_control_label.setStyleSheet("font-size: 10pt; color: red;")
+                elif  data['quality_control'][img_name] == "":   
+                        self.quality_control_label.setText(f"Quality Control: ")
+                        self.quality_control_label.setStyleSheet("font-size: 10pt; color: black;")      
+                else: 
+                    raise ValueError("only accepted, empty and '' are allowed")     
+                   
+                    
+            else:
+                data["quality_control"][img_name] = ""
+                self.quality_control_label.setText(f"Quality Control: ") 
+                self.quality_control_label.setStyleSheet("font-size: 10pt; color: black;")
+        
+        with open(self.quality_control_json_file_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4)
+   
+    
+    def qualityControl(self): ## on button click
+        qualityController = QualityControlDialog(
+            parent=self
+        )   
+        qualityController.quality_control_signal.connect(self.handleQualityControlButtons)
+        qualityController.exec_() 
+        
+        
+    def handleQualityControlButtons(self, verdict):
+        ## set the values of quality control, 
+        img_name = os.path.basename(self.current_img)[:-4]
+        with open(self.quality_control_json_file_path, 'r') as json_file:
+            data = json.load(json_file)
+            data["quality_control"][img_name] = verdict  
+
+        with open(self.quality_control_json_file_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4)
+        
+        self.updateQualityControl(img_name)    
 
 
     def zoomRequest(self, delta, pos):
@@ -1555,7 +1667,13 @@ def get_parser():
     parser.add_argument(
         "--max_size",
         default=720,
-    )   
+    ) 
+    parser.add_argument(
+        "--quality_control_mode",
+        type=bool,
+        default=False,
+    ) 
+  
     return parser
 
 if __name__ == '__main__':
@@ -1564,7 +1682,8 @@ if __name__ == '__main__':
     model_type = parser.parse_args().model_type
     keep_input_size = parser.parse_args().keep_input_size
     max_size = parser.parse_args().max_size
+    quality_control_mode = parser.parse_args().quality_control_mode
     app = QApplication(sys.argv)
-    main = MainWindow(global_h=global_h, global_w=global_w, model_type=model_type, keep_input_size=keep_input_size, max_size=max_size)
+    main = MainWindow(global_h=global_h, global_w=global_w, model_type=model_type, keep_input_size=keep_input_size, max_size=max_size, quality_control_mode=quality_control_mode)
     main.show()
     sys.exit(app.exec_())
