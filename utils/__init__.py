@@ -26,4 +26,5 @@ from .qt import distance
 from .qt import distancetoline
 from .qt import fmtShortcut
 
-from .dialogs import ImageNavigationWidget
+from .dialogs import ImageNavigationDialog
+from .dialogs import QualityControlDialog

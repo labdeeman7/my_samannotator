@@ -2,17 +2,18 @@ import sys
 import os
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                              QComboBox, QPushButton, QLineEdit, QLabel)
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtWidgets import QApplication, QDialog
 
-
-class ImageNavigationWidget(QDialog):
+class ImageNavigationDialog(QDialog):
     
     imageSelected = pyqtSignal(int)
     
     def __init__(self, parent, image_list, init_index=0):
-        super(ImageNavigationWidget, self).__init__(parent)
+        super(ImageNavigationDialog, self).__init__(parent)
         self.image_list = image_list
         self.setWindowTitle("Image Navigator")
+        self.move(100, QApplication.desktop().screenGeometry().height() - QApplication.desktop().screenGeometry().height()/3)  # Move to bottom-left corner
         # Ensure the starting index is within the valid range
         if not (0 <= init_index < len(self.image_list)):
             init_index = 0
@@ -75,3 +76,39 @@ class ImageNavigationWidget(QDialog):
 
 
 
+class QualityControlDialog(QDialog):
+    # Define signals
+    quality_control_signal = pyqtSignal(str)
+
+    def __init__(self, parent):
+        super(QualityControlDialog, self).__init__(parent)
+        self.setWindowTitle('Quality Control Dialog')
+        self.layout = QHBoxLayout()
+        
+
+        self.accept_button = QPushButton('Accept')
+        self.reject_button = QPushButton('Reject')
+
+        self.layout.addWidget(self.accept_button)
+        self.layout.addWidget(self.reject_button)
+
+        self.accept_button.clicked.connect(self.accept_clicked)
+        self.reject_button.clicked.connect(self.reject_clicked)
+
+        self.setLayout(self.layout)
+
+    def accept_clicked(self):
+        self.quality_control_signal.emit('Accepted')
+        self.close()
+
+    def reject_clicked(self):
+        self.quality_control_signal.emit('Rejected')
+        self.close()
+        
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_A:  # 'a' key
+            self.quality_control_signal.emit('Accepted')
+            self.close()
+        elif event.key() == Qt.Key_R:  # 'r' key
+            self.quality_control_signal.emit('Rejected') 
+            self.close()
