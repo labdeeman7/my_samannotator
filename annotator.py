@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
         quality_control = action(
             self.tr("Quality Control"),
             lambda: self.qualityControl(),
-            'q',
+            'c',
             "objects",
             self.tr("Quality Control"),
             enabled=False,
