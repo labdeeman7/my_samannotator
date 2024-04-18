@@ -23,9 +23,10 @@ from qtpy import QtGui, QtWidgets
 from canvas import Canvas
 import utils
 from utils.download_model import download_model
-from utils import ImageNavigationDialog, QualityControlDialog
+from utils import ImageNavigationDialog, QualityControlDialog,LabelDialog
 
-from labelme.widgets import ToolBar, UniqueLabelQListWidget, LabelDialog, LabelListWidget, LabelListWidgetItem, ZoomWidget
+from labelme.widgets import ToolBar, UniqueLabelQListWidget, LabelListWidget, LabelListWidgetItem, ZoomWidget
+
 from labelme import PY2
 from labelme.label_file import LabelFile
 from labelme.label_file import LabelFileError
@@ -846,7 +847,7 @@ class MainWindow(QMainWindow):
         pass
     
     def getMaxId(self):
-        max_id = -1
+        max_id = 0
         for label in self.labelList:
             if label.shape().group_id != None:
                 max_id = max(max_id, int(label.shape().group_id))
@@ -1020,8 +1021,8 @@ class MainWindow(QMainWindow):
             
     def addSamMask(self):
         if len(self.sam_mask) > 0:
-            label = 'Object'
-            group_id = self.getMaxId() + 1
+            label = ''
+            group_id = None
             if self.class_on_flag:
                 xx = self.labelDialog.popUp(
                     text=label,
@@ -1033,9 +1034,9 @@ class MainWindow(QMainWindow):
                 else:
                     label, _, group_id = xx
             if label == None:
-                label = 'Object'
+                label = ''
             if type(group_id) != int:
-                group_id=self.getMaxId() + 1
+                group_id=None
             for sam_mask in self.sam_mask:
                 sam_mask.label = label
                 sam_mask.group_id = group_id
@@ -1449,14 +1450,27 @@ class MainWindow(QMainWindow):
         return instance_color_map    
     
     def _get_color(self, label, instance_id):
-        instance_id = int(instance_id)
+        
+        if instance_id == 'None': 
+            #show white when you cancel
+            return [255,255,255]     
+        else:
+            instance_id = int(instance_id) 
+                
+        
         #capped to n_instances_per_class_max_for_visualization 
         if instance_id >= self.n_instances_per_class_max_for_visualization: 
             instance_id = self.n_instances_per_class_max_for_visualization-1 
         
-        class_id =  self.category_list.index(label)
-        color_id = int(class_id*self.n_instances_per_class_max_for_visualization + instance_id)
-        return self.instance_color_map[color_id]
+        if label in self.category_list:
+            class_id =  self.category_list.index(label)
+            color_id = int(class_id*self.n_instances_per_class_max_for_visualization + instance_id)
+            return self.instance_color_map[color_id]
+        else:
+            #show black when labelname is foreign
+            return [0,0,0]
+                
+        
         
     def _get_rgb_by_label(self, label):
         label = str(label)
