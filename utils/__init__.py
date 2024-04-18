@@ -28,3 +28,5 @@ from .qt import fmtShortcut
 
 from .dialogs import ImageNavigationDialog
 from .dialogs import QualityControlDialog
+
+from .label_dialog import LabelDialog
