@@ -161,11 +161,11 @@ class MainWindow(QMainWindow):
         self.current_img_data = ''
 
         #buttons for navigation
-        self.button_next = QPushButton('Next Image', self) # push button for next. 
+        self.button_next = QPushButton('&Next Image', self) # push button for next. 
         self.button_next.clicked.connect(self.clickButtonNext) # an event handler for the onlcicked event. 
-        self.button_last = QPushButton('Last Image', self)  # push button for last. 
+        self.button_last = QPushButton('&Last Image', self)  # push button for last. 
         self.button_last.clicked.connect(self.clickButtonLast) # an event handler for the onlcicked event. 
-        self.button_jump = QPushButton('Jump', self)  # push button for jumping to an image. 
+        self.button_jump = QPushButton('&Jump', self)  # push button for jumping to an image. 
         self.button_jump.clicked.connect(self.clickButtonJump) # an event handler for the onlcicked event. 
         
         # they start disabled. 
