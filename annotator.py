@@ -15,7 +15,7 @@ import torch
 import base64
 
 from PyQt5.QtWidgets import QWidget, QApplication, QMainWindow, QApplication, QPushButton, QLabel, QFileDialog, QProgressBar, QComboBox, QScrollArea, QDockWidget, QMessageBox
-from PyQt5.QtGui import QPixmap, QIcon, QImage
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QKeySequence
 from PyQt5.Qt import QSize
 from qtpy.QtCore import Qt
 from qtpy import QtCore
@@ -161,12 +161,18 @@ class MainWindow(QMainWindow):
         self.current_img_data = ''
 
         #buttons for navigation
-        self.button_next = QPushButton('&Next Image', self) # push button for next. 
+        self.button_next = QPushButton('Next Image', self) # push button for next. 
+        self.button_next.setShortcut(QKeySequence('W'))
         self.button_next.clicked.connect(self.clickButtonNext) # an event handler for the onlcicked event. 
-        self.button_last = QPushButton('&Last Image', self)  # push button for last. 
+        
+        self.button_last = QPushButton('Last Image', self)  # push button for last. 
+        self.button_last.setShortcut(QKeySequence('Q'))
         self.button_last.clicked.connect(self.clickButtonLast) # an event handler for the onlcicked event. 
-        self.button_jump = QPushButton('&Jump', self)  # push button for jumping to an image. 
+        # self.button_next.setShortcut("l")
+        self.button_jump = QPushButton('Jump', self)  # push button for jumping to an image. 
+        self.button_jump.setShortcut(QKeySequence('J'))
         self.button_jump.clicked.connect(self.clickButtonJump) # an event handler for the onlcicked event. 
+        # self.button_next.setShortcut("j")
         
         # they start disabled. 
         self.button_last.setEnabled(False)
