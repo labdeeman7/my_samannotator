@@ -12,7 +12,6 @@ import argparse
 import numpy as np
 import tempfile
 import torch
-import base64
 
 from PyQt5.QtWidgets import QWidget, QApplication, QMainWindow, QApplication, QPushButton, QLabel, QFileDialog, QProgressBar, QComboBox, QScrollArea, QDockWidget, QMessageBox
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QKeySequence
@@ -595,13 +594,11 @@ class MainWindow(QMainWindow):
             return data
 
         shapes = [format_shape(item.shape()) for item in self.labelList]
-        imageData = base64.b64encode(self.current_img_data).decode("utf-8")
         save_data = {
             "version": "1.0.0",
             "flags": {},
             "shapes": shapes,
             "imagePath": self.current_img,
-            "imageData": imageData,
             "imageHeight": self.raw_h,
             "imageWidth": self.raw_w
         }
