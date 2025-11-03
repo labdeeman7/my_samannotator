@@ -12,10 +12,9 @@ import argparse
 import numpy as np
 import tempfile
 import torch
-import base64
 
 from PyQt5.QtWidgets import QWidget, QApplication, QMainWindow, QApplication, QPushButton, QLabel, QFileDialog, QProgressBar, QComboBox, QScrollArea, QDockWidget, QMessageBox
-from PyQt5.QtGui import QPixmap, QIcon, QImage
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QKeySequence
 from PyQt5.Qt import QSize
 from qtpy.QtCore import Qt
 from qtpy import QtCore
@@ -23,11 +22,14 @@ from qtpy import QtGui, QtWidgets
 from canvas import Canvas
 import utils
 from utils.download_model import download_model
+from utils import ImageNavigationDialog, QualityControlDialog,LabelDialog
 
-from labelme.widgets import ToolBar, UniqueLabelQListWidget, LabelDialog, LabelListWidget, LabelListWidgetItem, ZoomWidget
+from labelme.widgets import ToolBar, UniqueLabelQListWidget, LabelListWidget, LabelListWidgetItem, ZoomWidget
+
 from labelme import PY2
 from labelme.label_file import LabelFile
 from labelme.label_file import LabelFileError
+
 
 
 from shape import Shape
@@ -42,47 +44,51 @@ from segment_anything import sam_model_registry, SamPredictor
 
 
 
-
+#me label colormap. TODO I need to either replace this, or I need to fo
 LABEL_COLORMAP = imgviz.label_colormap()
 
 class MainWindow(QMainWindow):
 
-    FIT_WINDOW, FIT_WIDTH, MANUAL_ZOOM = 0, 1, 2
+    FIT_WINDOW, FIT_WIDTH, MANUAL_ZOOM = 0, 1, 2 #me only manual zoom seems to be used it is used for setting some kind of zoom mode
 
-    def __init__(self, parent=None, global_w=1000, global_h=1800, model_type='vit_b', keep_input_size=True, max_size=1080):
+    def __init__(self, parent=None, global_w=1000, global_h=1800, model_type='vit_b', keep_input_size=True, max_size=1080, quality_control_mode=False):
         super(MainWindow, self).__init__(parent)
-        self.resize(global_w, global_h)
+        self.resize(global_w, global_h) #me I suspect these are changed with app resolution. 
         self.model_type = model_type
         self.keep_input_size = keep_input_size
         self.max_size = float(max_size)
+        self.quality_control_mode = quality_control_mode
 
-        self.setWindowTitle('segment-anything-annotator')
+        self.setWindowTitle('segment-anything-annotator') #me hey title. 
         self.canvas = Canvas(self,
             epsilon=10.0,
             double_click='close',
             num_backups=10,
             app=self,
-        )
+        ) #me canvas initialized. What is number of backups?
 
         
-        self._noSelectionSlot = False
-        self.current_output_dir = 'output'
+        self._noSelectionSlot = False #me No selection slot is very useful for removing event handling and ensuring events are not triggered multiple times.
+        self.current_output_dir = 'output' #me I guess this is default behaviour. But we change this when we select ann_dir. Not confirmed. 
         os.makedirs(self.current_output_dir, exist_ok=True)
-        self.current_output_filename = ''
-        self.canvas.zoomRequest.connect(self.zoomRequest)
+        self.current_output_filename = '' # This is what I am interested in improving. 
+        self.canvas.zoomRequest.connect(self.zoomRequest) # This affects canvas. Connects a function 
 
+        #Various variables that are important such as the sam_mask, the proposals. I am not sure what min_point_distance is. 
         self.memory_shapes = []
         self.sam_mask = []
         self.sam_mask_proposal = []
         self.image_encoded_flag = False
         self.min_point_dis = 4
 
-        self.predictor = None
-
+        self.predictor = None # predictor.
+        
+        #scrolling is handled here. Q scroll area defines a scrollable area. You can set widges in the scrollable area, make the widget resizable. Make scrollbars. 
+        #and connects signals emmited from the canvas to event handlers in the main window.  
         self.scroll_values = {
             Qt.Horizontal: {},
             Qt.Vertical: {},
-        }
+        } #Handles scrolling, keeps some x and y values for scrolln.  
         self.scrollArea = QScrollArea(self)
         self.scrollArea.setWidget(self.canvas)
         self.scrollArea.setWidgetResizable(True)
@@ -90,19 +96,22 @@ class MainWindow(QMainWindow):
             Qt.Vertical: self.scrollArea.verticalScrollBar(),
             Qt.Horizontal: self.scrollArea.horizontalScrollBar(),
         }
-        self.canvas.scrollRequest.connect(self.scrollRequest)
+        self.canvas.scrollRequest.connect(self.scrollRequest) #my first notice of event handling. It is a connection framework pyqt. 
         self.canvas.newShape.connect(self.newShape)
         self.canvas.shapeMoved.connect(self.setDirty)
         self.canvas.selectionChanged.connect(self.shapeSelectionChanged)
         self.canvas.drawingPolygon.connect(self.toggleDrawingSensitive)
 
-        self.uniqLabelList = UniqueLabelQListWidget()
+        #widgets are being defined. 
+        #this is a widget. For the displauying a list of items. I am not exactly sure where it is used.
+        self.uniqLabelList = UniqueLabelQListWidget() 
         self.uniqLabelList.setToolTip(
             self.tr(
                 "Select label to start annotating for it. "
                 "Press 'Esc' to deselect."
             )
         )
+        #widget for dialog, a dialog box, which is a child of mainwindow. 
         self.labelDialog = LabelDialog(
             parent=self,
             labels=[],
@@ -112,19 +121,22 @@ class MainWindow(QMainWindow):
             fit_to_content={'column': True, 'row': False},
         )
 
+        #this is a labellist widget. I think this is the one we use for selecting class. As the dibleclic, change,dropped are all connected to handlers. 
         self.labelList = LabelListWidget()
         self.labelList.itemSelectionChanged.connect(self.labelSelectionChanged)
         self.labelList.itemDoubleClicked.connect(self.editLabel)
         self.labelList.itemChanged.connect(self.labelItemChanged)
         self.labelList.itemDropped.connect(self.labelOrderChanged)
 
+        #this is the docking widget. Which displays the labellist of labels in an image. on the right side of the window. 
         self.shape_dock = QDockWidget(
             self.tr("Polygon Labels"), self
         )
         self.shape_dock.setObjectName("Labels")
         self.shape_dock.setWidget(self.labelList)
 
-        self.category_list = [i.strip() for i in open('categories.txt', 'r', encoding='utf-8').readlines()]
+        
+        self.category_list = [i.strip() for i in open('categories.txt', 'r', encoding='utf-8').readlines()] #initialization of the category list. 
         self.labelDialog = LabelDialog(
             parent=self,
             labels=self.category_list,
@@ -132,27 +144,49 @@ class MainWindow(QMainWindow):
             show_text_field=True,
             completion='contains',
             fit_to_content={'column': True, 'row': False},
-        )
+        ) #another dialog label, which overwrites the original label_dialog. It has the categories as the dialog. THis is what happens when you see the choose categories.
+               
+        #I think this is for when I want to work with videos, so ignoring currentlty.   
         self.zoom_values = {}
         self.video_directory = ''
         self.video_list = []
         self.video_len = len(self.video_list)
 
-        self.img_list = []
-        self.img_len = len(self.img_list)
-        self.current_img_index = 0
+        #we have an image list. TODO: this is useful for my todo which can jump to other points in the folder.  
+        self.img_list = [] #list of images, propagated when we click image directory button
+        self.img_len = len(self.img_list) 
+        self.current_img_index = 0 #starts from 0. 
         self.current_img = ''
         self.current_img_data = ''
 
-        self.button_next = QPushButton('Next Image', self)
-        self.button_next.clicked.connect(self.clickButtonNext)
-        self.button_last = QPushButton('Last Image', self)
-        self.button_last.clicked.connect(self.clickButtonLast)
+        #buttons for navigation
+        self.button_next = QPushButton('Next Image', self) # push button for next. 
+        self.button_next.setShortcut(QKeySequence('W'))
+        self.button_next.clicked.connect(self.clickButtonNext) # an event handler for the onlcicked event. 
+        
+        self.button_last = QPushButton('Last Image', self)  # push button for last. 
+        self.button_last.setShortcut(QKeySequence('Q'))
+        self.button_last.clicked.connect(self.clickButtonLast) # an event handler for the onlcicked event. 
+        # self.button_next.setShortcut("l")
+        self.button_jump = QPushButton('Jump', self)  # push button for jumping to an image. 
+        self.button_jump.setShortcut(QKeySequence('J'))
+        self.button_jump.clicked.connect(self.clickButtonJump) # an event handler for the onlcicked event. 
+        # self.button_next.setShortcut("j")
+        
+        # they start disabled. 
+        self.button_last.setEnabled(False)
+        self.button_next.setEnabled(False)
+        self.button_jump.setEnabled(False)
 
+        #progress bar
         self.img_progress_bar = QProgressBar(self)
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(1)
-        self.img_progress_bar.setValue(0)
+        self.img_progress_bar.setValue(0) #initialization
+        
+        #woow, the Q push buttons were also used for the proposals!! But these have images. 
+        # There is a way to set the icons of the images, and these are set to the images of the other sam proposals. 
+        # This can be seen when you check button_proposal_list.
         self.button_proposal1 = QPushButton('Proposal1', self)
         self.button_proposal1.clicked.connect(self.choose_proposal1)
         self.button_proposal1.setShortcut('1')
@@ -170,7 +204,20 @@ class MainWindow(QMainWindow):
         self.class_on_flag = True
         self.class_on_text = QLabel("Class On", self)
         
-
+        #image name display
+        self.img_name = QLabel(f"", self)
+        self.img_name.setStyleSheet("font-size: 10pt; color: black;")
+        
+        
+        #Quality Control display
+        self.quality_control_label = QLabel(f"", self)
+        self.quality_control_label.setStyleSheet("font-size: 10pt; color: black;")
+        
+        #Quality Control display
+        if self.quality_control_mode:
+            self.quality_control_json_file_path = None
+        
+        ## layout for the application. Note that the menu buttons have not been added.
         #naive layout
         self.scrollArea.move(int(0.02 * global_w), int(0.08 * global_h))
         self.scrollArea.resize(int(0.75 * global_w), int(0.7 * global_h))
@@ -193,13 +240,26 @@ class MainWindow(QMainWindow):
         self.button_proposal4.resize(int(0.17 * global_w),int(0.14 * global_h))
         self.button_proposal4.move(int(0.84 * global_w), int(0.8 * global_h))
         
+        self.img_name.move(int(0.2 * global_w), int(0.05 * global_h))
+        self.img_name.resize(int(0.2 * global_w),int(0.03 * global_h))
+        self.quality_control_label.move(int(0.53 * global_w), int(0.05 * global_h))
+        self.quality_control_label.resize(int(0.25 * global_w),int(0.03 * global_h))
+        self.button_jump.move(int(0.12 * global_w), int(0.85 * global_h))
+        self.button_jump.resize(int(0.05 * global_w),int(0.04 * global_h))
+        
         
         
         self.zoomWidget = ZoomWidget()
 
+        ## Actions initialization. All actions that would happen , there are two ways of doing this apparently. 
+        # Note that we add the action first, note that we can even give the text on the action.
+        # then we connect the action to a function which is to be triggered by this action. 
+        # Then we add the action to an event that is occuring. 
+        #A partial function with self prefilled. Where self is the mainwindow.
         action = functools.partial(utils.newAction, self)
         
-
+        # an action for the loading the category file. the lamda is the connect function. 
+        # self.tr("Category File"), this is the name for the action. 
         categoryFile = action(
             self.tr("Category File"),
             lambda: self.clickCategoryChoose(),
@@ -215,7 +275,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Image Directory"),
             enabled=True,
-        )
+        ) #image directory action. 
         LoadSAM = action(
             self.tr("Load SAM"),
             lambda: self.clickLoadSAM(),
@@ -223,7 +283,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Load SAM"),
             enabled=True,
-        )
+        ) # load sam button
         AutoSeg = action(
             self.tr("AutoSeg"),
             lambda: self.clickAutoSeg(),
@@ -231,7 +291,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("AutoSeg"),
             enabled=False,
-        )
+        )# not used.
         promptSeg = action(
             self.tr("Accept"),
             lambda: self.addSamMask(),
@@ -239,7 +299,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Accept"),
             enabled=False,
-        )
+        )#accept segmentation
 
         saveDirectory = action(
             self.tr("Save Directory"),
@@ -248,7 +308,7 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Save Directory"),
             enabled=True,
-        )
+        )#save directory in menu
 
         createMode = action(
             self.tr("Manual Polygons"),
@@ -257,7 +317,8 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Start drawing polygons"),
             enabled=True,
-        )
+        )# manual polygon, affects the canvas. 
+        
         createPointMode = action(
             self.tr("Point Prompt"),
             lambda: self.toggleDrawMode(False, createMode="point"),
@@ -265,7 +326,8 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Point Prompt"),
             enabled=True,
-        )
+        ) #point prompt
+        
         createRectangleMode = action(
             self.tr("Box Prompt"),
             lambda: self.toggleDrawMode(False, createMode="rectangle"),
@@ -273,7 +335,8 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Box Prompt"),
             enabled=True,
-        )
+        ) #box prompt
+        
         cleanPrompt = action(
             self.tr("Reject"),
             lambda: self.cleanPrompt(),
@@ -281,16 +344,17 @@ class MainWindow(QMainWindow):
             "objects",
             self.tr("Reject"),
             enabled=True,
-        )
+        ) # reject, cleans all things for segmentation.
         
+        #TODO: Remove switching of class 
         self.switchClass = action(
             self.tr("Class On/Off"),
             lambda: self.clickSwitchClass(),
             'none',
             "objects",
             self.tr("Class On/Off"),
-            enabled=True,
-        )
+            enabled=False,
+        ) # swithc class on and off. 
 
         editMode = action(
             self.tr("Edit Polygons"),
@@ -307,7 +371,7 @@ class MainWindow(QMainWindow):
             "save-as",
             self.tr("Save labels to a different file"),
             enabled=True,
-        )
+        )#not seen anywhere
 
         undoLastPoint = action(
             self.tr("Undo last point"),
@@ -316,7 +380,7 @@ class MainWindow(QMainWindow):
             "undo",
             self.tr("Undo last drawn point"),
             enabled=False,
-        )
+        )#undolast point, this is always greyed out currently. 
 
         hideAll = action(
             self.tr("&Hide\nPolygons"),
@@ -324,14 +388,15 @@ class MainWindow(QMainWindow):
             icon="eye",
             tip=self.tr("Hide all polygons"),
             enabled=False,
-        )
+        )# not seen anywhere
+        
         showAll = action(
             self.tr("&Show\nPolygons"),
             functools.partial(self.togglePolygons, True),
             icon="eye",
             tip=self.tr("Show all polygons"),
             enabled=False,
-        )
+        )#not seen anywhere.
 
         undo = action(
             self.tr("Undo"),
@@ -340,7 +405,7 @@ class MainWindow(QMainWindow):
             "undo",
             self.tr("Undo last add and edit of shape"),
             enabled=False,
-        )
+        )#undo button
 
         save = action(
             self.tr("&Save"),
@@ -349,7 +414,7 @@ class MainWindow(QMainWindow):
             "save",
             self.tr("Save labels to file"),
             enabled=False,
-        )
+        ) # never used. blurred out. 
 
         delete = action(
             self.tr("Delete Polygons"),
@@ -358,7 +423,8 @@ class MainWindow(QMainWindow):
             "cancel",
             self.tr("Delete the selected polygons"),
             enabled=False,
-        )
+        ) # delete polygons
+        
         duplicate = action(
             self.tr("Duplicate Polygons"),
             self.duplicateSelectedShape,
@@ -366,7 +432,8 @@ class MainWindow(QMainWindow):
             "copy",
             self.tr("Create a duplicate of the selected polygons"),
             enabled=False,
-        )
+        ) # duplicate polygons
+        
         reduce_point = action(
             self.tr("Reduce Points"),
             self.reducePoint,
@@ -374,7 +441,8 @@ class MainWindow(QMainWindow):
             "copy",
             self.tr("Reduce Points"),
             enabled=True,
-        )            
+        )   # reduce points. 
+                 
         edit = action(
             self.tr("&Edit Label"),
             self.editLabel,
@@ -382,9 +450,18 @@ class MainWindow(QMainWindow):
             "edit",
             self.tr("Modify the label of the selected polygon"),
             enabled=False,
-        )
+        ) # edit label.
         
-
+        quality_control = action(
+            self.tr("Quality Control"),
+            lambda: self.qualityControl(),
+            'c',
+            "objects",
+            self.tr("Quality Control"),
+            enabled=False,
+        ) # quality control menu
+        
+        # actions struct. 
         self.actions = utils.struct(
             categoryFile=categoryFile,
             imageDirectory=imageDirectory,
@@ -412,9 +489,10 @@ class MainWindow(QMainWindow):
                 undoLastPoint,
                 undo,
                 save,
+            ),
+            quality_control=quality_control
             )
-            )
-
+        #things for the canvas. Add actions etc 
         # Custom context menu for the canvas widget:
         utils.addActions(self.canvas.menus[0], self.actions.menu)
         utils.addActions(
@@ -425,6 +503,7 @@ class MainWindow(QMainWindow):
             ),
         )
 
+        #define the tool bar in which we add actions. 
         self.toolbar = self.addToolBar('Tool')
         self.toolbar.addAction(categoryFile)
         self.toolbar.addAction(imageDirectory)
@@ -445,6 +524,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(duplicate)
         self.toolbar.addAction(reduce_point)
         self.toolbar.addAction(save)
+        self.toolbar.addAction(quality_control)
         self.toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
 
         zoom = QtWidgets.QWidgetAction(self)
@@ -465,9 +545,15 @@ class MainWindow(QMainWindow):
         self.zoomWidget.setEnabled(True)
 
         self.zoomWidget.valueChanged.connect(self.paintCanvas)
-        self.canvas.actions = self.actions
+        self.canvas.actions = self.actions # all the actions are added to canvas?
+        
+        #colour variables
+        self.n_classes = len(self.category_list)
+        self.n_instances_per_class_max_for_visualization = 4 ## This can be a parameter probably.
+        self.instance_color_map = self._generate_instance_colormap()
 
 
+    ################# Methods #################################
     def saveFileAs(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
         self._saveFile(self.saveFileDialog())
@@ -508,13 +594,11 @@ class MainWindow(QMainWindow):
             return data
 
         shapes = [format_shape(item.shape()) for item in self.labelList]
-        imageData = base64.b64encode(self.current_img_data).decode("utf-8")
         save_data = {
             "version": "1.0.0",
             "flags": {},
             "shapes": shapes,
             "imagePath": self.current_img,
-            "imageData": imageData,
             "imageHeight": self.raw_h,
             "imageWidth": self.raw_w
         }
@@ -569,6 +653,9 @@ class MainWindow(QMainWindow):
     def loadAnno(self, filename):
         with open(filename,'r') as f:
             data = json.load(f)
+        
+        current_labels = set()
+            
         for shape in data['shapes']:
             label = shape["label"]
             try:
@@ -576,6 +663,9 @@ class MainWindow(QMainWindow):
                 label = self.category_list[ttt]
             except:
                 pass
+            
+            current_labels.add(label)
+
 
             points = shape["points"]
             shape_type = shape["shape_type"]
@@ -594,8 +684,24 @@ class MainWindow(QMainWindow):
                 shape.addPoint(QtCore.QPointF(x, y))
             shape.close()
             self.addLabel(shape)
+        
+        self.category_list = sorted(list(current_labels))
+        self.n_classes = len(self.category_list)
+        self.instance_color_map = self._generate_instance_colormap()    
+        
+        self.labelDialog = LabelDialog(
+            parent=self,
+            labels=self.category_list,
+            sort_labels=False,
+            show_text_field=True,
+            completion='contains',
+            fit_to_content={'column': True, 'row': False},
+        )
+        
+            
         self.canvas.loadShapes([item.shape() for item in self.labelList])
 
+    ##Navigation
     def clickButtonNext(self):
         if self.actions.save.isEnabled():
             self.saveFile()
@@ -611,8 +717,27 @@ class MainWindow(QMainWindow):
             self.current_img_index -= 1
             self.current_img = self.img_list[self.current_img_index]
             self.loadImg()
+    
+    def clickButtonJump(self):
+        if self.actions.save.isEnabled():
+            self.saveFile()
+        
+        imageNavigator = ImageNavigationDialog(
+            parent=self,
+            image_list=self.img_list,
+            init_index=self.current_img_index
+        )   
+        
+        imageNavigator.imageSelected.connect(self.handleJumpImageSelection)
+        imageNavigator.exec_()  
+    
+    def handleJumpImageSelection(self, index): 
+        self.current_img_index = index
+        self.current_img = self.img_list[self.current_img_index]
+        self.loadImg()        
 
-
+    
+    ## proposals
     def choose_proposal1(self):
         if len(self.sam_mask_proposal) > 0:
             self.sam_mask = self.sam_mask_proposal[0]
@@ -651,10 +776,15 @@ class MainWindow(QMainWindow):
             self.loadAnno(self.current_output_filename)
         self.image_encoded_flag = False
         self.current_img_data = LabelFile.load_image_file(self.current_img)
-
+        #set image_name
+        self.changeImageName(img_name)
+        #update quality control if we in quality control mode
+        if self.quality_control_mode:
+            self.updateQualityControl(img_name)
+        
 
     def clickFileChoose(self):
-        directory = QFileDialog.getExistingDirectory(self, 'choose target fold','.')
+        directory = QFileDialog.getExistingDirectory(self, 'choose sequence img_dir','.')
         if directory == '':
             return
         #self.img_list = glob.glob(directory + '/*.{jpg,png,JPG,PNG}')
@@ -667,10 +797,27 @@ class MainWindow(QMainWindow):
         self.current_img = self.img_list[self.current_img_index]
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(self.img_len-1)
+                
+        if self.quality_control_mode:
+            self.loadQualityControl(directory)
+            self.actions.quality_control.setEnabled(True)
+        
         self.loadImg()
+        self.enableNavigation()
+       
+            
+        
+        
+        
+    def enableNavigation(self):
+       #Enable navigation
+        self.button_last.setEnabled(True)
+        self.button_next.setEnabled(True)
+        self.button_jump.setEnabled(True) 
+        
 
     def clickSaveChoose(self):
-        directory = QFileDialog.getExistingDirectory(self, 'choose target fold','.')
+        directory = QFileDialog.getExistingDirectory(self, 'choose sequence ann_dir','.')
         if directory == '':
             return
         else:
@@ -687,6 +834,7 @@ class MainWindow(QMainWindow):
         else:
             self.class_on_flag = True
             self.class_on_text.setText('Class On')
+            
 
 
     def clickCategoryChoose(self):
@@ -704,6 +852,9 @@ class MainWindow(QMainWindow):
                     completion='contains',
                     fit_to_content={'column': True, 'row': False},
                 )
+                #regenerate the colours based on the categorylist
+                self.n_classes = len(self.category_list)
+                self.instance_color_map = self._generate_instance_colormap()
         except Exception as e:
             pass
 
@@ -721,7 +872,7 @@ class MainWindow(QMainWindow):
         pass
     
     def getMaxId(self):
-        max_id = -1
+        max_id = 0
         for label in self.labelList:
             if label.shape().group_id != None:
                 max_id = max(max_id, int(label.shape().group_id))
@@ -895,8 +1046,8 @@ class MainWindow(QMainWindow):
             
     def addSamMask(self):
         if len(self.sam_mask) > 0:
-            label = 'Object'
-            group_id = self.getMaxId() + 1
+            label = ''
+            group_id = None
             if self.class_on_flag:
                 xx = self.labelDialog.popUp(
                     text=label,
@@ -908,9 +1059,9 @@ class MainWindow(QMainWindow):
                 else:
                     label, _, group_id = xx
             if label == None:
-                label = 'Object'
+                label = ''
             if type(group_id) != int:
-                group_id=self.getMaxId() + 1
+                group_id=None
             for sam_mask in self.sam_mask:
                 sam_mask.label = label
                 sam_mask.group_id = group_id
@@ -925,8 +1076,6 @@ class MainWindow(QMainWindow):
         self.actions.save.setEnabled(True)
         self.actions.editMode.setEnabled(True)
 
-
-
     def cleanPrompt(self):
         self.canvas.currentBox = None
         self.canvas.currentPos = None
@@ -938,7 +1087,84 @@ class MainWindow(QMainWindow):
         self.canvas.setHiding()
         self.canvas.update()
         self.actions.editMode.setEnabled(True)
+    
+    ###################image name######################
+    def changeImageName(self, img_name): 
+        self.img_name.setText(f"Image Name: {img_name}")   
+           
+    ##################Quality Control#########################################     
+    def loadQualityControl(self, img_directory):
+        ## Checl
+        parent_dir = os.path.dirname(img_directory)
+        # Check if the folder exists
+        assert os.path.exists(parent_dir), 'the img folder does not exist.' 
 
+        # Extract folder name
+        seq_name = os.path.basename(parent_dir)
+
+        # Construct Quality control JSON file path
+        self.quality_control_json_file_path = os.path.join(parent_dir, f"{seq_name}_quality_control.json")
+
+        # Check if JSON file exists
+        if os.path.exists(self.quality_control_json_file_path):
+            with open(self.quality_control_json_file_path, 'r') as json_file:
+                data = json.load(json_file)
+                assert isinstance(data, dict), "JSON file does not contain a dictionary."
+        else:
+            # Create JSON file
+            with open(self.quality_control_json_file_path, 'w') as json_file:
+                # You can customize the initial JSON content here
+                initial_data = {"seq_name": seq_name,
+                                "quality_control": {}}
+                
+                json.dump(initial_data, json_file)
+
+    def updateQualityControl(self, img_name):
+        with open(self.quality_control_json_file_path, 'r') as json_file:
+            data = json.load(json_file)
+
+            # Check if "img_name" key exists within "data[quality_control]"
+            if img_name in data["quality_control"]:
+                self.quality_control_label.setText(f"Quality Control: {data['quality_control'][img_name]}") 
+                if data['quality_control'][img_name] == 'Accepted':
+                    self.quality_control_label.setStyleSheet("font-size: 10pt; color: green;")
+                elif data['quality_control'][img_name] == 'Rejected':
+                    self.quality_control_label.setStyleSheet("font-size: 10pt; color: red;")
+                elif  data['quality_control'][img_name] == "":   
+                        self.quality_control_label.setText(f"Quality Control: ")
+                        self.quality_control_label.setStyleSheet("font-size: 10pt; color: black;")      
+                else: 
+                    raise ValueError("only accepted, empty and '' are allowed")     
+                   
+                    
+            else:
+                data["quality_control"][img_name] = ""
+                self.quality_control_label.setText(f"Quality Control: ") 
+                self.quality_control_label.setStyleSheet("font-size: 10pt; color: black;")
+        
+        with open(self.quality_control_json_file_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4)
+   
+    
+    def qualityControl(self): ## on button click
+        qualityController = QualityControlDialog(
+            parent=self
+        )   
+        qualityController.quality_control_signal.connect(self.handleQualityControlButtons)
+        qualityController.exec_() 
+        
+        
+    def handleQualityControlButtons(self, verdict):
+        ## set the values of quality control, 
+        img_name = os.path.basename(self.current_img)[:-4]
+        with open(self.quality_control_json_file_path, 'r') as json_file:
+            data = json.load(json_file)
+            data["quality_control"][img_name] = verdict  
+
+        with open(self.quality_control_json_file_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4)
+        
+        self.updateQualityControl(img_name)    
 
 
     def zoomRequest(self, delta, pos):
@@ -1181,7 +1407,8 @@ class MainWindow(QMainWindow):
             item = self.uniqLabelList.createItemFromLabel(shape.label)
             self.uniqLabelList.addItem(item)
             # rgb = self._get_rgb_by_label(shape.label)
-            rgb = self._get_rgb_by_label(shape.group_id)
+            # rgb = self._get_rgb_by_label(shape.group_id)
+            rgb = self._get_rgb_by_label_and_instance_id(shape.label, shape.group_id)
             self.uniqLabelList.setItemLabel(item, shape.label, rgb)
 
     def labelItemChanged(self, item):
@@ -1203,7 +1430,8 @@ class MainWindow(QMainWindow):
             item = self.uniqLabelList.createItemFromLabel(shape.label)
             self.uniqLabelList.addItem(item)
             # rgb = self._get_rgb_by_label(shape.label)
-            rgb = self._get_rgb_by_label(shape.group_id)
+            # rgb = self._get_rgb_by_label(shape.group_id)
+            rgb = self._get_rgb_by_label_and_instance_id(shape.label, shape.group_id)
             self.uniqLabelList.setItemLabel(item, shape.label, rgb)
         self.labelDialog.addLabelHistory(shape.label)
         for action in self.actions.onShapesPresent:
@@ -1215,8 +1443,63 @@ class MainWindow(QMainWindow):
                 html.escape(text), *shape.fill_color.getRgb()[:3]
             )
         )
+    ## colour    
+    def _generate_instance_colormap(self):
+        # Generate class colors using imgviz.label_colormap
+        class_colors = imgviz.label_colormap(self.n_classes+1)
+        class_colors = class_colors[1:,:] #remove the gray colour.  
+        
+        
+        class_colors = class_colors/255
+
+        # Create an empty list to store instance colors
+        instance_color_map = []
+
+        # Iterate over each class
+        for class_idx in range(self.n_classes):
+            # Get the default color for the class
+            class_color = class_colors[class_idx]
+
+            # Calculate offsets for instance colors
+            # You can customize these offsets based on your preference
+            instance_offsets = np.linspace(0.1, 0.6, self.n_instances_per_class_max_for_visualization)
+
+            # Iterate over each instance in the class and add a little offset, then return to 255
+            for instance_offset in instance_offsets:
+                instance_color = np.clip(class_color + instance_offset, 0.0, 1.0)
+                instance_color = instance_color * 255
+                instance_color = instance_color.astype(int)
+                instance_color_map.append(instance_color)
+
+        
+        return instance_color_map    
+    
+    def _get_color(self, label, instance_id):
+        
+        if instance_id == 'None': 
+            #show white when you cancel
+            return [255,255,255]     
+        else:
+            instance_id = int(instance_id) 
+                
+        
+        #capped to n_instances_per_class_max_for_visualization 
+        if instance_id >= self.n_instances_per_class_max_for_visualization: 
+            instance_id = self.n_instances_per_class_max_for_visualization-1 
+        
+        if label in self.category_list:
+            class_id =  self.category_list.index(label)
+            color_id = int(class_id*self.n_instances_per_class_max_for_visualization + instance_id)
+            return self.instance_color_map[color_id]
+        else:
+            #show black when labelname is foreign
+            return [0,0,0]
+                
+        
+        
     def _get_rgb_by_label(self, label):
         label = str(label)
+        # print(f'label {label}')
         item = self.uniqLabelList.findItemByLabel(label)
         if item is None:
             item = self.uniqLabelList.createItemFromLabel(label)
@@ -1224,8 +1507,28 @@ class MainWindow(QMainWindow):
             rgb = self._get_rgb_by_label(label)
             self.uniqLabelList.setItemLabel(item, label, rgb)
         label_id = self.uniqLabelList.indexFromItem(item).row() + 1
+        # print(f'label_id {label_id}')
         label_id += 0
+        # print(f'label_id {label_id}')
         return LABEL_COLORMAP[label_id % len(LABEL_COLORMAP)]
+
+    
+    def _get_rgb_by_label_and_instance_id(self, label, instance_id):
+        label = str(label)
+        instance_id = str(instance_id)
+        item = self.uniqLabelList.findItemByLabel(instance_id)
+        if item is None:
+            item = self.uniqLabelList.createItemFromLabel(instance_id)
+            self.uniqLabelList.addItem(item)
+            rgb = self._get_rgb_by_label_and_instance_id(label, instance_id)
+            self.uniqLabelList.setItemLabel(item, instance_id, rgb)
+        
+        color =  self._get_color(label, instance_id)
+        return color
+        # label_id = self.uniqLabelList.indexFromItem(item).row() + 1    
+        # label_id = self.uniqLabelList.indexFromItem(item).row() + 1
+        
+        # return LABEL_COLORMAP[label_id % len(LABEL_COLORMAP)]
 
     def togglePolygons(self, value):
         for item in self.labelList:
@@ -1233,7 +1536,8 @@ class MainWindow(QMainWindow):
 
     def _update_shape_color(self, shape):
         # r, g, b = self._get_rgb_by_label(shape.label)
-        r, g, b = self._get_rgb_by_label(shape.group_id)
+        # r, g, b = self._get_rgb_by_label(shape.group_id)
+        r, g, b = self._get_rgb_by_label_and_instance_id(shape.label, shape.group_id)
         shape.line_color = QtGui.QColor(r, g, b)
         shape.vertex_fill_color = QtGui.QColor(r, g, b)
         shape.hvertex_fill_color = QtGui.QColor(255, 255, 255)
@@ -1402,7 +1706,13 @@ def get_parser():
     parser.add_argument(
         "--max_size",
         default=720,
-    )   
+    ) 
+    parser.add_argument(
+        "--quality_control_mode",
+        type=bool,
+        default=False,
+    ) 
+  
     return parser
 
 if __name__ == '__main__':
@@ -1411,7 +1721,8 @@ if __name__ == '__main__':
     model_type = parser.parse_args().model_type
     keep_input_size = parser.parse_args().keep_input_size
     max_size = parser.parse_args().max_size
+    quality_control_mode = parser.parse_args().quality_control_mode
     app = QApplication(sys.argv)
-    main = MainWindow(global_h=global_h, global_w=global_w, model_type=model_type, keep_input_size=keep_input_size, max_size=max_size)
+    main = MainWindow(global_h=global_h, global_w=global_w, model_type=model_type, keep_input_size=keep_input_size, max_size=max_size, quality_control_mode=quality_control_mode)
     main.show()
     sys.exit(app.exec_())
