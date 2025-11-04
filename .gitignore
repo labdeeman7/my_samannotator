@@ -1,19 +1,49 @@
-# datasets
-datasets/
-
-#venv
-.formatcholecseg8k/
-
-#cache
+# Byte-compiled / optimized / DLL files
 __pycache__/
+*.py[cod]
+*$py.class
 
-# images 
-demo_image/
+# Virtual environment folders
+.venv/
+.env/
+env/
+venv/
+.samannotatortool/
 
-demo_video/
+# OS files
+.DS_Store
+Thumbs.db
 
-vit_b.pth
-vit_h.pth
-vit_l.pth
+# VSCode settings
+.vscode/
 
-seq/
+# Output, backup, and temporary data
+backup/
+output/
+*.log
+
+# Jupyter / Python notebooks checkpoints
+.ipynb_checkpoints/
+
+# Build and distribution folders
+build/
+dist/
+*.egg-info/
+
+# Git and local project config
+.gitignore
+.gitmodules
+
+# Large demo or binary files
+*.gif
+*.mp4
+*.avi
+*.mov
+
+# Any temporary data files
+*.tmp
+*.bak
+*.swp
+
+# Optional: IDE-specific settings
+.idea/
